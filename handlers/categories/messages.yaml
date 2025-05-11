@@ -1,0 +1,21 @@
+not_registered:
+  text: |
+    Ты не зарегистрирован! Начни с /registration
+request_category:
+  text: |
+    Введи название новой категории
+category_exists:
+  text: |
+    Категория <b>{category}</b> уже существует!
+ask_more_categories:
+  text: |
+    Хотите добавить ещё одну категорию?
+max_categories:
+  text: |
+    Вы добавили максимум <b>{count}</b> категорий!
+success:
+  text: |
+    Добавлено <b>{count}</b> категории успешно!
+no_categories:
+  text: |
+    Ты не добавил ни одной категории
