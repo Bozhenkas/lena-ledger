@@ -1,6 +1,6 @@
-"""
+'''
 обработчик команды /start
-"""
+'''
 
 import yaml
 import os
@@ -15,14 +15,14 @@ from database.db_methods import get_user, add_user, is_registered  # импор�
 router = Router()
 
 # путь к messages.yaml в той же папке
-MESSAGES_PATH = os.path.join(os.path.dirname(__file__), "messages.yaml")
+MESSAGES_PATH = os.path.join(os.path.dirname(__file__), 'messages.yaml')
 
 # загрузка сообщений
-with open(MESSAGES_PATH, "r", encoding="utf-8") as file:
+with open(MESSAGES_PATH, 'r', encoding='utf-8') as file:
     MESSAGES = yaml.safe_load(file)
 
 
-@router.message(Command("start"))
+@router.message(Command('start'))
 async def cmd_start(message: types.Message):
     # получение tg_id и tg_username из сообщения
     tg_id = message.from_user.id
@@ -40,3 +40,8 @@ async def cmd_start(message: types.Message):
                              reply_markup=await get_start_kb())
     else:
         await message.answer(MESSAGES['menu'], reply_markup=await get_menu_kb())
+
+
+@router.message(F.text== 'Назад ↩️')
+async def msg_menu(message: types.Message):
+    await message.answer(MESSAGES['menu'], reply_markup=await get_menu_kb())

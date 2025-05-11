@@ -1,7 +1,3 @@
-"""
-обработчик для регистрации пользователя + /registration
-"""
-
 import yaml
 import os
 
@@ -11,7 +7,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 
 from keyboards.for_start import get_start_kb
-from keyboards.for_registration import get_confirm_kb  # импортируем клавиатуру
+from keyboards.for_registration import *  # импортируем клавиатуры
 from database.db_methods import get_user, add_user, update_user
 from handlers.categories.categories import AddCategory
 
@@ -19,11 +15,12 @@ from handlers.categories.categories import AddCategory
 router = Router()
 
 # путь к messages.yaml в той же папке
-MESSAGES_PATH = os.path.join(os.path.dirname(__file__), "messages.yaml")
+MESSAGES_PATH = os.path.join(os.path.dirname(__file__), 'messages.yaml')
 
 # загрузка сообщений
-with open(MESSAGES_PATH, "r", encoding="utf-8") as file:
+with open(MESSAGES_PATH, 'r', encoding='utf-8') as file:
     MESSAGES = yaml.safe_load(file)
+
 
 # состояния для регистрации
 class Registration(StatesGroup):
@@ -31,16 +28,17 @@ class Registration(StatesGroup):
     sum_input = State()
     confirm_registration = State()
 
-@router.message(Command("registration"))
-@router.message(F.text == "Начать регистрацию")
+
+@router.message(Command('registration'))
+@router.message(F.text == 'Начать регистрацию')
 async def cmd_register(message: types.Message, state: FSMContext):
     tg_id = message.from_user.id
     tg_username = message.from_user.username
 
     user = await get_user(tg_id)
-    if user and user["name"] and user["total_sum"] is not None:
+    if user and user['name'] and user['total_sum'] is not None:
         await message.answer(
-            MESSAGES["already_registered"]["text"].format(name=user["name"])
+            MESSAGES['already_registered'].format(name=user['name'])
         )
         return
 
@@ -52,13 +50,15 @@ async def cmd_register(message: types.Message, state: FSMContext):
     )
     await state.set_state(Registration.name_input)
 
-@router.message(Command("cancel"))
+
+@router.message(Command('cancel'))
 async def cancel_registration(message: types.Message, state: FSMContext):
     await message.answer(
-        MESSAGES["registration_cancelled"]["text"],
+        MESSAGES['registration_cancelled'],
         reply_markup=await get_start_kb()
     )
     await state.clear()
+
 
 @router.message(Registration.name_input, F.text)
 async def process_name(message: types.Message, state: FSMContext):
@@ -66,9 +66,10 @@ async def process_name(message: types.Message, state: FSMContext):
     await state.update_data(name=name)
 
     await message.answer(
-        MESSAGES["request_sum"]["text"]
+        MESSAGES['request_sum']
     )
     await state.set_state(Registration.sum_input)
+
 
 @router.message(Registration.sum_input, F.text)
 async def process_initial_sum(message: types.Message, state: FSMContext):
@@ -78,37 +79,35 @@ async def process_initial_sum(message: types.Message, state: FSMContext):
             raise ValueError
     except ValueError:
         await message.answer(
-            MESSAGES["request_sum"]["error"]
+            MESSAGES['request_sum_error']
         )
         return
 
     user_data = await state.get_data()
-    await state.update_data(sum=initial_sum, name=user_data["name"])
+    await state.update_data(sum=initial_sum, name=user_data['name'])
 
     await message.answer(
-        MESSAGES["confirm_registration"]["text"].format(name=user_data["name"], sum=initial_sum),
+        MESSAGES['confirm_registration'].format(name=user_data['name'], sum=initial_sum),
         reply_markup=await get_confirm_kb()
     )
     await state.set_state(Registration.confirm_registration)
 
+
 @router.message(Registration.confirm_registration, F.text)
 async def process_confirm_registration(message: types.Message, state: FSMContext):
-    if message.text == "Да":
+    if message.text == 'Да':
         user_data = await state.get_data()
-        name = user_data["name"]
-        initial_sum = user_data["sum"]
+        name = user_data['name']
+        initial_sum = user_data['sum']
         await update_user(message.from_user.id, name=name, total_sum=initial_sum)
 
         await message.answer(
-            MESSAGES["success"]["text"].format(name=name, sum=initial_sum),
-            reply_markup=await get_start_kb()
-        )
-
-        await state.update_data(categories=[])
+            MESSAGES['success'].format(name=name, sum=initial_sum))
         await message.answer(
-            MESSAGES["request_category"]["text"]
+            MESSAGES['pls_add_categories'],
+            reply_markup=await get_add_category_kb()
         )
-        await state.set_state(AddCategory.waiting_for_category_name)
+        await state.clear()
     else:
         await message.answer(
             MESSAGES['request_name']

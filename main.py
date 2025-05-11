@@ -1,12 +1,6 @@
 from aiogram.client.default import DefaultBotProperties
 from aiogram import Bot, Dispatcher
 
-# del
-from aiogram import Router, types, F
-from aiogram.filters.command import Command
-from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
-# del
-
 from handlers import start, registration, categories
 import asyncio
 from dotenv import load_dotenv

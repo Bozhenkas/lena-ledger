@@ -12,11 +12,12 @@ async def get_confirm_kb() -> types.ReplyKeyboardMarkup:
     )
 
 
-async def get_category_continue_kb() -> types.ReplyKeyboardMarkup:
+async def get_add_category_kb() -> types.ReplyKeyboardMarkup:
     kb = [
-        [types.KeyboardButton(text="Да"), types.KeyboardButton(text="Отмена")]
+        [types.KeyboardButton(text="Добавить категории")]
     ]
     return types.ReplyKeyboardMarkup(
         keyboard=kb,
         resize_keyboard=True,
-        one_time_keyboard=False)
+        one_time_keyboard=False
+    )

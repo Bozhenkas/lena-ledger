@@ -1,111 +1,164 @@
-"""
-обработчик для добавления категорий.
-"""
-
 import yaml
 import os
 
-from aiogram import Router, types, F
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery
 from aiogram.filters.command import Command
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 
-from keyboards.for_registration import get_category_continue_kb  # импортируем клавиатуру
-from database.db_methods import get_user, update_user
+from keyboards.for_categories import get_add_category_kb, get_categories_kb, get_add_more_kb
+from keyboards.for_start import get_menu_kb
+from database.db_methods import get_categories, add_category, update_user, is_registered
 
-# создание роутера
 router = Router()
 
+# Локальный словарь для хранения категорий (обновляется при вызове /categories)
+categories_dict = {}
+
 # путь к messages.yaml в той же папке
-MESSAGES_PATH = os.path.join(os.path.dirname(__file__), "messages.yaml")
+MESSAGES_PATH = os.path.join(os.path.dirname(__file__), 'messages.yaml')
 
 # загрузка сообщений
-with open(MESSAGES_PATH, "r", encoding="utf-8") as file:
+with open(MESSAGES_PATH, 'r', encoding='utf-8') as file:
     MESSAGES = yaml.safe_load(file)
 
-# состояния для добавления категорий
+
+# Определение FSM для добавления категории
 class AddCategory(StatesGroup):
     waiting_for_category_name = State()
     confirming_more_categories = State()
 
-@router.message(Command("addcategory"))
-async def cmd_add_category(message: types.Message, state: FSMContext):
+
+@router.message(F.text == 'Категории' or Command('categories'))
+async def show_categories(message: Message, state: FSMContext):
+    """Обработчик команды /categories и текста 'Категории'."""
     tg_id = message.from_user.id
-    user = await get_user(tg_id)
-    if not user:
-        await message.answer(
-            MESSAGES["not_registered"]["text"]
-        )
+    if not await is_registered(tg_id):
+        await message.answer(MESSAGES['not_registered'])
         return
 
-    await state.update_data(categories=[])
-    await message.answer(
-        MESSAGES["request_category"]["text"]
+    # Получаем список категорий из базы
+    categories = await get_categories(tg_id)
+
+    # Обновляем локальный словарь категорий (key - callback_data, value - название)
+    global categories_dict
+    categories_dict = {f'category_{i}': cat for i, cat in enumerate(categories)}
+
+    # Первое сообщение с клавиатурой добавления
+    await message.answer(MESSAGES['placeholder'], reply_markup=await get_add_category_kb(), disable_notification=True)
+
+    # Второе сообщение с инлайн-кнопками категорий (пагинация до 5 за раз)
+    # Сохраняем ID сообщения для последующего редактирования
+    categories_message = await message.answer(
+        MESSAGES['show_categories'],
+        reply_markup=await get_categories_kb(categories, page=0)
     )
+    # Сохраняем message_id в FSM-контексте
+    await state.update_data(categories_message_id=categories_message.message_id)
+
+
+@router.message(F.text.in_(['Добавить категорию', 'Добавить категории']))
+async def start_add_category(message: Message, state: FSMContext):
+    """Начало процесса добавления категории."""
+    await message.answer(MESSAGES['request_category'])
     await state.set_state(AddCategory.waiting_for_category_name)
 
-@router.message(AddCategory.waiting_for_category_name, F.text)
-async def process_category_name(message: types.Message, state: FSMContext):
+
+@router.message(AddCategory.waiting_for_category_name)
+async def process_category_name(message: Message, state: FSMContext):
+    """Обработка введенного названия категории."""
     category_name = message.text.strip()
+    tg_id = message.from_user.id
 
-    if category_name in ["Да", "Отмена"]:
+    try:
+        await add_category(tg_id, category_name)
+        # Обновляем локальный словарь
+        categories = await get_categories(tg_id)
+        global categories_dict
+        categories_dict[f'category_{len(categories) - 1}'] = category_name
+
+        # Получаем ID сообщения с категориями из FSM-контекста
+        data = await state.get_data()
+        categories_message_id = data.get('categories_message_id')
+
+        # Обновляем сообщение с категориями
+        if categories_message_id:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=categories_message_id,
+                text=MESSAGES['show_categories'],
+                reply_markup=await get_categories_kb(categories, page=0)
+            )
+
         await message.answer(
-            MESSAGES["invalid_input"]["text"]
-        )
-        return
-
-    user_data = await state.get_data()
-    categories = user_data.get("categories", [])
-    user = await get_user(message.from_user.id)
-    all_categories = user["categories"] + categories
-
-    if category_name in all_categories:
-        await message.answer(
-            MESSAGES["category_exists"]["text"].format(category=category_name)
-        )
-        return
-
-    categories.append(category_name)
-    await state.update_data(categories=categories)
-
-    await message.answer(
-        MESSAGES["success_category"]["text"].format(category=category_name)
-    )
-
-    if len(categories) < 3:
-        await message.answer(
-            MESSAGES["ask_more_categories"]["text"],
-            reply_markup=await get_category_continue_kb()
+            MESSAGES['category_added'].format(category_name=category_name),
+            reply_markup=await get_add_more_kb()
         )
         await state.set_state(AddCategory.confirming_more_categories)
-    else:
-        await message.answer(
-            MESSAGES["max_categories"]["text"].format(count=len(categories))
-        )
-        all_categories = user["categories"] + categories
-        await update_user(message.from_user.id, categories=all_categories)
-        await state.clear()
+    except ValueError as e:
+        await message.answer(MESSAGES['category_exists'])
+        await state.set_state(AddCategory.waiting_for_category_name)
+
 
 @router.message(AddCategory.confirming_more_categories, F.text)
-async def process_continue_choice(message: types.Message, state: FSMContext):
-    if message.text == "Да":
+async def process_add_more_choice(message: Message, state: FSMContext):
+    """Обработка выбора 'Добавить ещё' или 'Хватит'."""
+    tg_id = message.from_user.id
+    categories = await get_categories(tg_id)
+
+    # Получаем ID сообщения с категориями из FSM-контекста
+    data = await state.get_data()
+    categories_message_id = data.get('categories_message_id')
+
+    if message.text == 'Добавить ещё':
+        # Обновляем сообщение с категориями перед добавлением новой
+        if categories_message_id:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=categories_message_id,
+                text=MESSAGES['show_categories'],
+                reply_markup=await get_categories_kb(categories, page=0)
+            )
         await message.answer(
-            MESSAGES["request_category"]["text"],
+            MESSAGES['request_category'],
             reply_markup=None
         )
         await state.set_state(AddCategory.waiting_for_category_name)
-    else:  # "Отмена"
-        user_data = await state.get_data()
-        categories = user_data.get("categories", [])
-        if categories:
-            user = await get_user(message.from_user.id)
-            all_categories = user["categories"] + categories
-            await update_user(message.from_user.id, categories=all_categories)
-            await message.answer(
-                MESSAGES["success"]["text"].format(count=len(categories))
+    else:  # 'Хватит'
+        # Обновляем сообщение с категориями перед выходом
+        if categories_message_id:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=categories_message_id,
+                text=MESSAGES['show_categories'],
+                reply_markup=await get_categories_kb(categories, page=0)
             )
-        else:
-            await message.answer(
-                MESSAGES["no_categories"]["text"]
-            )
+        await message.answer(
+            MESSAGES['category_add_completed'],
+            reply_markup=await get_menu_kb()
+        )
         await state.clear()
+
+
+@router.callback_query(F.data.startswith('page_'))
+async def handle_pagination(callback: CallbackQuery):
+    """Обработка пагинации категорий."""
+    page = int(callback.data.split('_')[1])
+    categories = await get_categories(callback.from_user.id)
+
+    await callback.message.edit_text(
+        MESSAGES['show_categories'],
+        reply_markup=await get_categories_kb(categories, page)
+    )
+    await callback.answer()
+
+
+@router.message(F.text.in_(['Назад ↩️', '/start']))
+async def back_to_menu(message: Message, state: FSMContext):
+    """Обработчик для выхода в меню через 'Назад ↩️' или '/start'."""
+    await state.clear()
+    await message.answer(
+        MESSAGES['menu'],
+        reply_markup=None
+    )
