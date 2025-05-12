@@ -15,7 +15,7 @@ async def add_user(tg_id: int, tg_username: Optional[str] = None) -> None:
         tg_username (Optional[str]): Имя пользователя в Telegram (без @), может быть None.
     """
     async with aiosqlite.connect(DB_PATH) as db:
-        default_categories = json.dumps([])
+        default_categories = json.dumps([], ensure_ascii=False)
         await db.execute(
             "INSERT OR IGNORE INTO users (tg_id, tg_username, categories, total_sum) VALUES (?, ?, ?, 0.0)",
             (tg_id, tg_username, default_categories)
@@ -35,7 +35,7 @@ async def update_user(tg_id: int, **kwargs: Any) -> None:
             return
 
         if "categories" in kwargs and not isinstance(kwargs["categories"], str):
-            kwargs["categories"] = json.dumps(kwargs["categories"])
+            kwargs["categories"] = json.dumps(kwargs["categories"], ensure_ascii=False)
 
         fields = ", ".join(f"{key} = ?" for key in kwargs.keys())
         values = list(kwargs.values()) + [tg_id]
@@ -193,10 +193,13 @@ async def is_registered(tg_id: int) -> bool:
         tg_id (int): Telegram ID пользователя.
 
     возвращает:
-        bool: True, если пользователь зарегистрирован (есть имя и начальная сумма), False в противном случае.
+        bool: True, если пользователь существует в базе, False в противном случае.
     """
     user = await get_user(tg_id)
-    return bool(user and user["name"] and user["total_sum"] is not None)
+    # Логирование для отладки
+    print(f"Checking registration for tg_id={tg_id}: user={user}")
+    # Проверяем только наличие записи в базе
+    return bool(user)
 
 async def add_category(tg_id: int, category: str) -> None:
     """
@@ -211,7 +214,7 @@ async def add_category(tg_id: int, category: str) -> None:
         raise ValueError("Пользователь не найден")
 
     categories = user["categories"]
-    if category not in categories:  # Проверка уникальности
+    if category not in categories:
         categories.append(category)
         await update_user(tg_id, categories=categories)
     else:
@@ -243,4 +246,5 @@ async def update_categories(tg_id: int, new_categories: List[str]) -> None:
     user = await get_user(tg_id)
     if not user:
         raise ValueError("Пользователь не найден")
-    await update_user(tg_id, categories=new_categories)
+    categories_json = json.dumps(new_categories, ensure_ascii=False)
+    await update_user(tg_id, categories=categories_json)

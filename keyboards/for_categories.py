@@ -5,7 +5,7 @@ from math import ceil
 async def get_add_category_kb() -> ReplyKeyboardMarkup:
     """Клавиатура для добавления категории."""
     kb = [
-        [KeyboardButton(text="Добавить категории")],
+        [KeyboardButton(text="Добавить категорию")],
         [KeyboardButton(text="Назад ↩️")],
           ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
@@ -27,9 +27,9 @@ async def get_categories_kb(categories: list, page: int) -> InlineKeyboardMarkup
     # Добавляем навигационные кнопки, если нужно
     nav_row = []
     if page > 0:
-        nav_row.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"page_{page - 1}"))
+        nav_row.append(InlineKeyboardButton(text=f"⬅️ [{page+1}/{total_pages}]", callback_data=f"page_{page - 1}"))
     if page < total_pages - 1:
-        nav_row.append(InlineKeyboardButton(text="Вперед ➡️", callback_data=f"page_{page + 1}"))
+        nav_row.append(InlineKeyboardButton(text=f"[{page+1}/{total_pages}] ➡️", callback_data=f"page_{page + 1}"))
     if nav_row:
         kb.append(nav_row)
 
