@@ -1,7 +1,7 @@
 from aiogram.client.default import DefaultBotProperties
 from aiogram import Bot, Dispatcher
 
-from handlers import start, registration, categories, profile, transactions, report
+from handlers import start, registration, categories, profile, transactions, report, analysys
 import asyncio
 from dotenv import load_dotenv
 import os
@@ -26,7 +26,7 @@ dp = Dispatcher()
 
 # регистрация роутеров
 dp.include_routers(start.router, registration.router, categories.router, profile.router, transactions.router,
-                   report.router)
+                   report.router, analysys.router)
 
 
 async def main():
