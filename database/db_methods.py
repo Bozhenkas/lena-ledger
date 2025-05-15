@@ -6,6 +6,7 @@ from datetime import datetime
 # Путь к базе данных
 DB_PATH = "database/data.db"
 
+
 async def add_user(tg_id: int, tg_username: Optional[str] = None) -> None:
     """
     добавление нового пользователя в базу данных.
@@ -21,6 +22,7 @@ async def add_user(tg_id: int, tg_username: Optional[str] = None) -> None:
             (tg_id, tg_username, default_categories)
         )
         await db.commit()
+
 
 async def update_user(tg_id: int, **kwargs: Any) -> None:
     """
@@ -42,6 +44,7 @@ async def update_user(tg_id: int, **kwargs: Any) -> None:
         query = f"UPDATE users SET {fields} WHERE tg_id = ?"
         await db.execute(query, values)
         await db.commit()
+
 
 async def get_user(tg_id: int) -> Optional[Dict[str, Any]]:
     """
@@ -69,6 +72,7 @@ async def get_user(tg_id: int) -> Optional[Dict[str, Any]]:
             }
         return None
 
+
 async def delete_user(tg_id: int) -> None:
     """
     удаление пользователя и всех связанных данных (транзакции, лимиты) по tg_id.
@@ -79,6 +83,7 @@ async def delete_user(tg_id: int) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM users WHERE tg_id = ?", (tg_id,))
         await db.commit()
+
 
 async def add_transaction(tg_id: int, type_: int, sum_: float, category: Optional[str] = None,
                           description: Optional[str] = None) -> int:
@@ -103,6 +108,7 @@ async def add_transaction(tg_id: int, type_: int, sum_: float, category: Optiona
         )
         await db.commit()
         return cursor.lastrowid
+
 
 async def get_transactions(tg_id: int, limit: int = 10) -> List[Dict[str, Any]]:
     """
@@ -134,6 +140,7 @@ async def get_transactions(tg_id: int, limit: int = 10) -> List[Dict[str, Any]]:
             for row in rows
         ]
 
+
 async def add_limit(tg_id: int, start_date: str, end_date: str, limit_sum: float,
                     category: Optional[str] = None) -> int:
     """
@@ -156,6 +163,7 @@ async def add_limit(tg_id: int, start_date: str, end_date: str, limit_sum: float
         )
         await db.commit()
         return cursor.lastrowid
+
 
 async def get_limits(tg_id: int) -> List[Dict[str, Any]]:
     """
@@ -185,6 +193,7 @@ async def get_limits(tg_id: int) -> List[Dict[str, Any]]:
             for row in rows
         ]
 
+
 async def is_registered(tg_id: int) -> bool:
     """
     проверка, зарегистрирован ли пользователь.
@@ -200,6 +209,7 @@ async def is_registered(tg_id: int) -> bool:
     print(f"Checking registration for tg_id={tg_id}: user={user}")
     # Проверяем только наличие записи в базе
     return bool(user)
+
 
 async def add_category(tg_id: int, category: str) -> None:
     """
@@ -220,6 +230,7 @@ async def add_category(tg_id: int, category: str) -> None:
     else:
         raise ValueError("Категория уже существует")
 
+
 async def get_categories(tg_id: int) -> List[str]:
     """
     Получение списка категорий пользователя.
@@ -235,6 +246,7 @@ async def get_categories(tg_id: int) -> List[str]:
         raise ValueError("Пользователь не найден")
     return user["categories"]
 
+
 async def update_categories(tg_id: int, new_categories: List[str]) -> None:
     """
     Полное замещение списка категорий пользователя новым списком.
@@ -248,3 +260,35 @@ async def update_categories(tg_id: int, new_categories: List[str]) -> None:
         raise ValueError("Пользователь не найден")
     categories_json = json.dumps(new_categories, ensure_ascii=False)
     await update_user(tg_id, categories=categories_json)
+
+
+async def get_transactions_by_period(tg_id: int, start_date: str, end_date: str) -> List[Dict[str, Any]]:
+    """
+    Получение списка транзакций пользователя за указанный период.
+
+    Аргументы:
+        tg_id (int): Telegram ID пользователя.
+        start_date (str): Начальная дата периода в формате ISO (например, "2023-10-01").
+        end_date (str): Конечная дата периода в формате ISO (например, "2023-10-31").
+
+    Возвращает:
+        List[Dict[str, Any]]: Список словарей с данными о транзакциях.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT transaction_id, date_time, type, description, category, sum "
+            "FROM transactions WHERE tg_id = ? AND date_time >= ? AND date_time < ? ORDER BY date_time",
+            (tg_id, start_date, end_date)
+        )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "transaction_id": row[0],
+                "date_time": row[1],
+                "type": row[2],
+                "description": row[3],
+                "category": row[4],
+                "sum": row[5]
+            }
+            for row in rows
+        ]

@@ -23,7 +23,7 @@ async def get_start_kb():
 async def get_menu_kb() -> types.ReplyKeyboardMarkup:
     kb = [
         [types.KeyboardButton(text="Потратил"), types.KeyboardButton(text="Получил")],
-        [types.KeyboardButton(text="Анализ [β]")],
+        [types.KeyboardButton(text="Отчёт")],
         [types.KeyboardButton(text="Категории"), types.KeyboardButton(text="Лимиты")],
         [types.KeyboardButton(text="Профиль")],
 
