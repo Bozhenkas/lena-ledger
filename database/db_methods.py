@@ -1,3 +1,5 @@
+"""методы для работы с базой данных sqlite, включая операции с пользователями, транзакциями, категориями и лимитами"""
+
 import aiosqlite
 import json
 from typing import Optional, Dict, Any, List
@@ -73,16 +75,38 @@ async def get_user(tg_id: int) -> Optional[Dict[str, Any]]:
         return None
 
 
-async def delete_user(tg_id: int) -> None:
+async def delete_user(tg_id: int) -> bool:
     """
-    удаление пользователя и всех связанных данных (транзакции, лимиты) по tg_id.
+    Удаление пользователя и всех связанных с ним данных.
 
-    аргументы:
+    Аргументы:
         tg_id (int): Telegram ID пользователя.
+
+    Возвращает:
+        bool: True, если удаление прошло успешно, False в противном случае.
     """
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM users WHERE tg_id = ?", (tg_id,))
-        await db.commit()
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            # Удаляем транзакции пользователя
+            await db.execute('DELETE FROM transactions WHERE tg_id = ?', (tg_id,))
+            
+            # Удаляем лимиты пользователя
+            await db.execute('DELETE FROM limits WHERE tg_id = ?', (tg_id,))
+            
+            # Очищаем данные пользователя (оставляем запись, но сбрасываем поля)
+            await db.execute('''
+                UPDATE users 
+                SET name = NULL, 
+                    total_sum = NULL, 
+                    categories = '[]' 
+                WHERE tg_id = ?
+            ''', (tg_id,))
+            
+            await db.commit()
+            return True
+    except Exception as e:
+        print(f"Error in delete_user: {e}")
+        return False
 
 
 async def add_transaction(tg_id: int, type_: int, sum_: float, category: Optional[str] = None,
@@ -141,57 +165,63 @@ async def get_transactions(tg_id: int, limit: int = 10) -> List[Dict[str, Any]]:
         ]
 
 
-async def add_limit(tg_id: int, start_date: str, end_date: str, limit_sum: float,
-                    category: Optional[str] = None) -> int:
-    """
-    добавление нового лимита в базу данных.
+async def add_limit(tg_id: int, start_date: str, end_date: str, category: str, limit_sum: float) -> bool:
+    """Добавление нового лимита для пользователя"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "INSERT INTO limits (tg_id, start_date, end_date, category, limit_sum) VALUES (?, ?, ?, ?, ?)",
+                (tg_id, start_date, end_date, category, limit_sum)
+            )
+            await db.commit()
+            return True
+    except Exception as e:
+        print(f"Error adding limit: {e}")
+        return False
 
-    аргументы:
-        tg_id (int): Telegram ID пользователя.
-        start_date (str): Дата начала лимита в ISO-формате (например, "2025-02-01").
-        end_date (str): Дата окончания лимита в ISO-формате (например, "2025-02-28").
-        limit_sum (float): Сумма лимита (положительное число).
-        category (Optional[str]): Категория лимита, должна быть в users.categories или None.
 
-    возвращает:
-        int: ID добавленного лимита.
-    """
+async def get_user_limits(tg_id: int) -> list:
+    """Получение всех активных лимитов пользователя"""
     async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
         cursor = await db.execute(
-            "INSERT INTO limits (tg_id, start_date, end_date, category, limit_sum) VALUES (?, ?, ?, ?, ?)",
-            (tg_id, start_date, end_date, category, limit_sum)
-        )
-        await db.commit()
-        return cursor.lastrowid
-
-
-async def get_limits(tg_id: int) -> List[Dict[str, Any]]:
-    """
-    получение списка всех лимитов пользователя.
-
-    аргументы:
-        tg_id (int): Telegram ID пользователя.
-
-    возвращает:
-        List[Dict[str, Any]]: Список словарей с данными о лимитах.
-    """
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT limit_id, start_date, end_date, category, limit_sum "
-            "FROM limits WHERE tg_id = ? ORDER BY start_date",
+            "SELECT * FROM limits WHERE tg_id = ? AND end_date >= date('now')",
             (tg_id,)
         )
-        rows = await cursor.fetchall()
-        return [
-            {
-                "limit_id": row[0],
-                "start_date": row[1],
-                "end_date": row[2],
-                "category": row[3],
-                "limit_sum": row[4]
-            }
-            for row in rows
-        ]
+        return [dict(row) for row in await cursor.fetchall()]
+
+
+async def delete_limit(limit_id: int, tg_id: int) -> bool:
+    """Удаление лимита по его ID"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "DELETE FROM limits WHERE limit_id = ? AND tg_id = ?",
+                (limit_id, tg_id)
+            )
+            await db.commit()
+            return True
+    except Exception as e:
+        print(f"Error deleting limit: {e}")
+        return False
+
+
+async def get_limit_usage(tg_id: int, category: str, start_date: str, end_date: str) -> float:
+    """Получение суммы расходов по категории за период"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT COALESCE(SUM(sum), 0) as total
+            FROM transactions
+            WHERE tg_id = ? 
+            AND category = ?
+            AND date_time BETWEEN ? AND ?
+            AND type = 1
+            """,
+            (tg_id, category, start_date, end_date)
+        )
+        result = await cursor.fetchone()
+        return float(result[0])
 
 
 async def is_registered(tg_id: int) -> bool:
@@ -202,13 +232,12 @@ async def is_registered(tg_id: int) -> bool:
         tg_id (int): Telegram ID пользователя.
 
     возвращает:
-        bool: True, если пользователь существует в базе, False в противном случае.
+        bool: True, если пользователь существует в базе и завершил регистрацию, False в противном случае.
     """
     user = await get_user(tg_id)
-    # Логирование для отладки
-    print(f"Checking registration for tg_id={tg_id}: user={user}")
-    # Проверяем только наличие записи в базе
-    return bool(user)
+
+    # Проверяем наличие записи в базе и заполненность обязательных полей
+    return bool(user and user.get('name') and user.get('total_sum') is not None)
 
 
 async def add_category(tg_id: int, category: str) -> None:
@@ -292,3 +321,143 @@ async def get_transactions_by_period(tg_id: int, start_date: str, end_date: str)
             }
             for row in rows
         ]
+
+
+async def check_limit_violation(tg_id: int, category: str, amount: float) -> Optional[Dict[str, Any]]:
+    """
+    Проверка нарушения лимита при добавлении новой транзакции.
+    
+    Возвращает информацию о нарушенном лимите или None, если лимиты не нарушены.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """
+            SELECT * FROM limits 
+            WHERE tg_id = ? 
+            AND category = ? 
+            AND date('now') BETWEEN start_date AND end_date
+            """,
+            (tg_id, category)
+        )
+        limit = await cursor.fetchone()
+        
+        if not limit:
+            return None
+            
+        # Получаем сумму расходов за период лимита
+        current_spent = await get_limit_usage(
+            tg_id, 
+            category, 
+            limit["start_date"], 
+            limit["end_date"]
+        )
+        
+        # Проверяем, не будет ли превышен лимит после новой транзакции
+        if current_spent + amount > limit["limit_sum"]:
+            return {
+                "category": category,
+                "limit_sum": limit["limit_sum"],
+                "current_spent": current_spent,
+                "new_amount": amount,
+                "end_date": limit["end_date"]
+            }
+        return None
+
+
+async def get_expiring_limits() -> List[Dict[str, Any]]:
+    """
+    Получение списка лимитов, которые истекают завтра.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """
+            SELECT l.*, u.tg_username 
+            FROM limits l
+            JOIN users u ON l.tg_id = u.tg_id
+            WHERE l.end_date = date('now', '+1 day')
+            """
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
+
+async def get_violated_limits() -> List[Dict[str, Any]]:
+    """
+    Получение списка нарушенных лимитов (где текущие расходы превышают установленный лимит).
+    """
+    violated_limits = []
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """
+            SELECT l.*, u.tg_username 
+            FROM limits l
+            JOIN users u ON l.tg_id = u.tg_id
+            WHERE date('now') BETWEEN l.start_date AND l.end_date
+            """
+        )
+        active_limits = await cursor.fetchall()
+        
+        for limit in active_limits:
+            current_spent = await get_limit_usage(
+                limit["tg_id"],
+                limit["category"],
+                limit["start_date"],
+                limit["end_date"]
+            )
+            if current_spent > limit["limit_sum"]:
+                limit_dict = dict(limit)
+                limit_dict["current_spent"] = current_spent
+                violated_limits.append(limit_dict)
+                
+        return violated_limits
+
+
+async def get_transactions_by_category(tg_id: int, category: str, page: int = 0, items_per_page: int = 5) -> List[Dict[str, Any]]:
+    """
+    Получение списка транзакций пользователя по категории с поддержкой пагинации.
+
+    Аргументы:
+        tg_id (int): Telegram ID пользователя.
+        category (str): Категория транзакций.
+        page (int): Номер страницы (начиная с 0).
+        items_per_page (int): Количество элементов на странице.
+
+    Возвращает:
+        List[Dict[str, Any]]: Список словарей с данными о транзакциях и общее количество транзакций.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Получаем общее количество транзакций для этой категории
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM transactions WHERE tg_id = ? AND category = ?",
+            (tg_id, category)
+        )
+        total_count = (await cursor.fetchone())[0]
+
+        # Получаем транзакции с пагинацией
+        offset = page * items_per_page
+        cursor = await db.execute(
+            """
+            SELECT transaction_id, date_time, type, description, category, sum 
+            FROM transactions 
+            WHERE tg_id = ? AND category = ? 
+            ORDER BY date_time DESC
+            LIMIT ? OFFSET ?
+            """,
+            (tg_id, category, items_per_page, offset)
+        )
+        rows = await cursor.fetchall()
+        transactions = [
+            {
+                "transaction_id": row[0],
+                "date_time": row[1],
+                "type": row[2],
+                "description": row[3],
+                "category": row[4],
+                "sum": row[5],
+                "total_count": total_count
+            }
+            for row in rows
+        ]
+        return transactions

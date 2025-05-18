@@ -1,2 +1,23 @@
-# lena-ledger
-An assistant bot to keep track of daily financial transactions, with a unique AI analysis feature.
+
+# Lena Ledger Bot 🤖💰
+
+Интеллектуальный Telegram-бот, созданный для удобного управления личными финансами с функцией анализа расходов на базе ИИ.
+
+## Структура проекта 📁
+
+```
+lena_bot/
+├── main.py              # Главная точка входа
+├── handlers/            # Обработчики команд и обратных вызовов
+│   ├── start/           # Начальные команды бота
+│   ├── registration/    # Логика регистрации пользователя
+│   ├── categories/      # Управление категориями
+│   ├── profile/         # Работа с профилем пользователя
+│   ├── transactions/    # Управление транзакциями
+│   ├── report/          # Генерация отчетов
+│   └── analysys/        # Функции анализа ИИ
+├── keyboards/           # Раскладки клавиатур Telegram
+├── database/            # Модели и операции с базой данных
+└── requirements.txt     # Зависимости проекта
+```
+

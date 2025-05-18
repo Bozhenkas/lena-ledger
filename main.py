@@ -1,7 +1,10 @@
+"""основной файл приложения, инициализация и запуск telegram-бота"""
+
 from aiogram.client.default import DefaultBotProperties
 from aiogram import Bot, Dispatcher
 
-from handlers import start, registration, categories, profile, transactions, report, analysys
+from handlers import start, registration, categories, profile, transactions, report, analysys, limits
+from handlers.scheduler import check_limits
 import asyncio
 from dotenv import load_dotenv
 import os
@@ -25,11 +28,21 @@ bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode='HTML'))
 dp = Dispatcher()
 
 # регистрация роутеров
-dp.include_routers(start.router, registration.router, categories.router, profile.router, transactions.router,
-                   report.router, analysys.router)
+dp.include_routers(
+    start.router,
+    registration.router,
+    categories.router,
+    profile.router,
+    transactions.router,
+    report.router,
+    analysys.router,
+    limits.router
+)
 
 
 async def main():
+    # Запуск планировщика проверки лимитов в отдельной задаче
+    asyncio.create_task(check_limits(bot))
     # запуск бота
     await dp.start_polling(bot)
 

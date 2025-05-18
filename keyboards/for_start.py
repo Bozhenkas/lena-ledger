@@ -1,12 +1,10 @@
-""""
-создание клавиатуры ответа Главного меню
-также используется как клавиатура для команды /start
-"""
+"""клавиатуры для главного меню и начальной регистрации пользователя"""
 
 from aiogram import types
 
 
 async def get_start_kb():
+    """создает одноразовую клавиатуру для начальной регистрации с одной кнопкой."""
     k = [
         [types.KeyboardButton(text='Начать регистрацию'), ]
     ]
@@ -21,6 +19,7 @@ async def get_start_kb():
 
 
 async def get_menu_kb() -> types.ReplyKeyboardMarkup:
+    """создает клавиатуру главного меню со всеми основными функциями бота и опциями навигации."""
     kb = [
         [types.KeyboardButton(text="Потратил"), types.KeyboardButton(text="Получил")],
         [types.KeyboardButton(text="Отчёт"), types.KeyboardButton(text="Анализ")],
@@ -31,5 +30,6 @@ async def get_menu_kb() -> types.ReplyKeyboardMarkup:
     return types.ReplyKeyboardMarkup(
         keyboard=kb,
         resize_keyboard=True,
+        is_persistent=True,
         one_time_keyboard=False
     )

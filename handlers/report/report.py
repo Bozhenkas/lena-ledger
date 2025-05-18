@@ -1,3 +1,5 @@
+"""обработчик формирования финансовых отчетов за выбранный период времени"""
+
 import yaml
 import os
 from datetime import datetime, timedelta
@@ -38,7 +40,6 @@ async def cmd_report(message: types.Message, state: FSMContext):
 @router.callback_query(F.data == "report_back_to_menu")
 async def handle_back_to_menu(callback: types.CallbackQuery, state: FSMContext):
     """Обработчик кнопки 'Назад' для возврата в меню."""
-    await callback.message.delete()
     await callback.message.answer(MESSAGES['menu'], reply_markup=await get_menu_kb())
     await state.clear()
     await callback.answer()  # Закрываем callback

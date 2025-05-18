@@ -1,3 +1,5 @@
+"""обработчик регистрации: сбор данных пользователя и настройка начальных категорий"""
+
 import yaml
 import os
 
@@ -102,7 +104,7 @@ async def process_confirm_registration(message: types.Message, state: FSMContext
         await update_user(message.from_user.id, name=name, total_sum=initial_sum)
 
         await message.answer(
-            MESSAGES['success'].format(name=name, sum=initial_sum))
+            MESSAGES['success'].format(name=name, sum=initial_sum), disable_notification=True)
         await message.answer(
             MESSAGES['pls_add_categories'],
             reply_markup=await get_add_category_kb()

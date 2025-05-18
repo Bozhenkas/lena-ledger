@@ -1,3 +1,5 @@
+"""обработчик финансовых транзакций: добавление доходов и расходов по категориям"""
+
 import yaml
 import os
 
@@ -6,7 +8,11 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 from keyboards.for_transactions import get_categories_kb, get_confirm_kb
-from database.db_methods import get_categories, add_transaction
+from database.db_methods import (
+    get_categories,
+    add_transaction,
+    check_limit_violation
+)
 
 # Создание роутера
 router = Router()
@@ -23,6 +29,7 @@ class TransactionState(StatesGroup):
     enter_amount = State()         # Ввод суммы
     select_category = State()      # Выбор категории
     confirm_transaction = State()  # Подтверждение транзакции
+    confirm_limit_override = State()  # Подтверждение превышения лимита
 
 # Обработчик команды "Потратил"
 @router.message(F.text == 'Потратил')
@@ -74,17 +81,46 @@ async def process_amount(message: types.Message, state: FSMContext):
 async def process_category(callback: types.CallbackQuery, state: FSMContext):
     category = callback.data
     await state.update_data(category=category)
-
     data = await state.get_data()
-    amount = data['amount']
-    text = MESSAGES['confirm_transaction'].format(amount=amount, category=category)
+    
+    # Проверка лимитов
+    if data['type_'] == 1:  # Только для расходов
+        limit_violation = await check_limit_violation(
+            callback.from_user.id,
+            category,
+            data['amount']
+        )
+        
+        if limit_violation:
+            # Если есть нарушение лимита, показываем предупреждение
+            total_amount = limit_violation['current_spent'] + data['amount']
+            over_limit = total_amount - limit_violation['limit_sum']
+            
+            text = MESSAGES['limit_warning'].format(
+                category=category,
+                limit_sum=limit_violation['limit_sum'],
+                current_spent=limit_violation['current_spent'],
+                new_amount=data['amount'],
+                total_amount=total_amount,
+                over_limit=over_limit
+            )
+            keyboard = await get_confirm_kb()
+            await callback.message.edit_text(text, reply_markup=keyboard)
+            await state.set_state(TransactionState.confirm_limit_override)
+            return
 
+    # Если нет нарушения лимита, показываем обычное подтверждение
+    text = MESSAGES['confirm_transaction'].format(
+        amount=data['amount'],
+        category=f"\nКатегория: {category}" if data['type_'] == 1 else ''
+    )
     keyboard = await get_confirm_kb()
     await callback.message.edit_text(text, reply_markup=keyboard)
     await state.set_state(TransactionState.confirm_transaction)
 
 # Обработка подтверждения транзакции
 @router.callback_query(TransactionState.confirm_transaction)
+@router.callback_query(TransactionState.confirm_limit_override)
 async def process_confirm(callback: types.CallbackQuery, state: FSMContext):
     if callback.data == 'confirm':
         data = await state.get_data()

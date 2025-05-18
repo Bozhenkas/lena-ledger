@@ -1,16 +1,18 @@
+"""клавиатуры для формирования финансовых отчетов и навигации по периодам"""
+
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime, timedelta
 
 
 async def get_period_kb() -> InlineKeyboardMarkup:
-    """Клавиатура для выбора периода отчета."""
+    """создает клавиатуру для выбора периода отчета (день, неделя, месяц, полгода, год)."""
     buttons = [
-        [InlineKeyboardButton(text="День", callback_data="day")],
         [
-            InlineKeyboardButton(text="Неделя", callback_data="week"),
-            InlineKeyboardButton(text="Месяц", callback_data="month")
+            InlineKeyboardButton(text="День", callback_data="day"),
+            InlineKeyboardButton(text="Неделя", callback_data="week")
         ],
         [
+            InlineKeyboardButton(text="Месяц", callback_data="month"),
             InlineKeyboardButton(text="Полгода", callback_data="half_year"),
             InlineKeyboardButton(text="Год", callback_data="year")
         ],
@@ -20,7 +22,7 @@ async def get_period_kb() -> InlineKeyboardMarkup:
 
 
 async def get_navigation_kb(period: str, start_date: str) -> InlineKeyboardMarkup:
-    """Клавиатура для навигации по периодам."""
+    """создает навигационную клавиатуру с элементами управления для конкретного периода и форматированием дат."""
     buttons = []
     today = datetime.now().date()
     start_date = datetime.fromisoformat(start_date).date()
