@@ -129,21 +129,28 @@ async def show_report(callback: types.CallbackQuery, state: FSMContext):
     period = data['period']
     today = datetime.now().date()
 
-    # Получение транзакций
-    transactions = await get_transactions_by_period(tg_id, start_date.isoformat(), end_date.isoformat())
+    # Получение транзакций до конца выбранного периода
+    transactions = await get_transactions_by_period(tg_id, "2000-01-01", end_date.isoformat())
 
-    # Расчет доходов и расходов
-    income = sum(t['sum'] for t in transactions if t['type'] == 0)
-    expenses = sum(t['sum'] for t in transactions if t['type'] == 1)
-    expenses_by_category = {}
+    # Расчет баланса на конец периода
+    total_sum = 0
     for t in transactions:
+        if t['type'] == 0:  # доход
+            total_sum += t['sum']
+        else:  # расход
+            total_sum -= t['sum']
+
+    # Получение транзакций только за выбранный период для отчета
+    period_transactions = [t for t in transactions if datetime.fromisoformat(t['date_time']).date() >= start_date]
+
+    # Расчет доходов и расходов за период
+    income = sum(t['sum'] for t in period_transactions if t['type'] == 0)
+    expenses = sum(t['sum'] for t in period_transactions if t['type'] == 1)
+    expenses_by_category = {}
+    for t in period_transactions:
         if t['type'] == 1:
             category = t['category'] or 'Без категории'
             expenses_by_category[category] = expenses_by_category.get(category, 0) + t['sum']
-
-    # Получение текущего баланса
-    user = await get_user(tg_id)
-    total_sum = user['total_sum']
 
     # Генерация человекочитаемого названия периода
     period_display = get_period_display(period, start_date, today)

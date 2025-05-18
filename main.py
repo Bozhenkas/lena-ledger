@@ -3,7 +3,7 @@
 from aiogram.client.default import DefaultBotProperties
 from aiogram import Bot, Dispatcher
 
-from handlers import start, registration, categories, profile, transactions, report, analysys, limits
+from handlers import start, registration, categories, profile, transactions, report, analysys, limits, forecast
 from handlers.scheduler import check_limits
 import asyncio
 from dotenv import load_dotenv
@@ -36,7 +36,8 @@ dp.include_routers(
     transactions.router,
     report.router,
     analysys.router,
-    limits.router
+    limits.router,
+    forecast.router,
 )
 
 

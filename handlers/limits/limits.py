@@ -153,24 +153,14 @@ async def process_amount(message: Message, state: FSMContext):
 @router.callback_query(LimitStates.CHOOSING_CATEGORY)
 async def process_category_selection(callback: CallbackQuery, state: FSMContext):
     """Обработка выбора категории"""
-    if callback.data.startswith("category_"):
-        # Получаем индекс категории из callback_data
+    if callback.data not in ["next_page", "prev_page"]:
         try:
-            category_index = int(callback.data.replace("category_", ""))
-            # Получаем список категорий пользователя
+            data = await state.get_data()
+            category = callback.data
+
+            # Проверяем, что категория существует в списке категорий пользователя
             user_categories = await get_categories(callback.from_user.id)
-            
-            # Проверяем, что индекс находится в пределах списка
-            if 0 <= category_index < len(user_categories):
-                # Получаем реальное название категории по индексу
-                category = user_categories[category_index]
-                # Отладочный вывод
-                print(f"Selected category index: {category_index}")
-                print(f"Selected category name: {category}")
-                print(f"User categories: {user_categories}")
-                
-                data = await state.get_data()
-                
+            if category in user_categories:
                 if await add_limit(
                     callback.from_user.id,
                     data["start_date"],
@@ -189,17 +179,17 @@ async def process_category_selection(callback: CallbackQuery, state: FSMContext)
                     )
                 else:
                     await callback.message.edit_text(
-                        "⚠️ Не удалось добавить лимит. Возможно, произошла ошибка при сохранении.",
+                        MESSAGES["error_add_limit"],
                         reply_markup=get_limit_actions_keyboard()
                     )
             else:
                 await callback.message.edit_text(
-                    "⚠️ Ошибка: выбранная категория не найдена в списке ваших категорий.",
+                    MESSAGES["error_category_not_found"],
                     reply_markup=get_limit_actions_keyboard()
                 )
         except ValueError:
             await callback.message.edit_text(
-                "⚠️ Произошла ошибка при обработке выбора категории.",
+                MESSAGES["error_process_category"],
                 reply_markup=get_limit_actions_keyboard()
             )
         
@@ -256,7 +246,7 @@ async def process_limit_delete(callback: CallbackQuery):
         return
 
     await callback.message.edit_text(
-        "Выберите лимит для удаления:",
+        MESSAGES["select_limit_to_delete"],
         reply_markup=get_limits_list_keyboard(limits)
     )
 
@@ -272,7 +262,7 @@ async def confirm_limit_delete(callback: CallbackQuery, state: FSMContext):
 
     if not limit_info:
         await callback.message.edit_text(
-            "⚠️ Лимит не найден.",
+            MESSAGES["limit_not_found"],
             reply_markup=get_limit_actions_keyboard()
         )
         return
@@ -301,7 +291,7 @@ async def process_delete_confirmation(callback: CallbackQuery, state: FSMContext
         )
     else:
         await callback.message.edit_text(
-            "⚠️ Не удалось удалить лимит. Попробуйте позже.",
+            MESSAGES["error_delete_limit"],
             reply_markup=get_limit_actions_keyboard()
         )
 

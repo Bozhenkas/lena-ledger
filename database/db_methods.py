@@ -304,13 +304,15 @@ async def get_transactions_by_period(tg_id: int, start_date: str, end_date: str)
         List[Dict[str, Any]]: Список словарей с данными о транзакциях.
     """
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT transaction_id, date_time, type, description, category, sum "
-            "FROM transactions WHERE tg_id = ? AND date_time >= ? AND date_time < ? ORDER BY date_time",
-            (tg_id, start_date, end_date)
-        )
+        query = """
+            SELECT transaction_id, date_time, type, description, category, sum 
+            FROM transactions 
+            WHERE tg_id = ? AND date_time >= ? AND date_time < ? 
+            ORDER BY date_time DESC
+        """
+        cursor = await db.execute(query, (tg_id, start_date, end_date))
         rows = await cursor.fetchall()
-        return [
+        result = [
             {
                 "transaction_id": row[0],
                 "date_time": row[1],
@@ -321,6 +323,7 @@ async def get_transactions_by_period(tg_id: int, start_date: str, end_date: str)
             }
             for row in rows
         ]
+        return result
 
 
 async def check_limit_violation(tg_id: int, category: str, amount: float) -> Optional[Dict[str, Any]]:

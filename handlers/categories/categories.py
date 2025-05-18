@@ -224,7 +224,7 @@ async def show_category_transactions(callback: CallbackQuery, state: FSMContext)
 @router.callback_query(F.data == "decorate")
 async def handle_decorate_button(callback: CallbackQuery):
     """Обработчик декоративной кнопки с номером страницы."""
-    await callback.answer("Это декоративная кнопка", show_alert=False)
+    await callback.answer(MESSAGES["decorative_button"], show_alert=False)
 
 
 @router.callback_query(F.data.startswith("cat_del_"))
@@ -234,7 +234,7 @@ async def confirm_delete_category(callback: CallbackQuery, state: FSMContext):
     category = categories_dict.get(f"category_{cat_idx}")
     
     if not category:
-        await callback.answer("Категория не найдена")
+        await callback.answer(MESSAGES["category_not_found"])
         return
     
     # Создаем клавиатуру подтверждения
@@ -246,8 +246,7 @@ async def confirm_delete_category(callback: CallbackQuery, state: FSMContext):
     ]
     
     await callback.message.edit_text(
-        f"Вы уверены, что хотите удалить категорию {category}?\n"
-        "Все транзакции в этой категории останутся, но будут помечены как 'Без категории'",
+        MESSAGES["confirm_delete"].format(category=category),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
     )
     await callback.answer()
@@ -260,7 +259,7 @@ async def delete_category(callback: CallbackQuery, state: FSMContext):
     category = categories_dict.get(f"category_{cat_idx}")
     
     if not category:
-        await callback.answer("Категория не найдена")
+        await callback.answer(MESSAGES["category_not_found"])
         return
     
     # Получаем текущие категории
@@ -280,9 +279,9 @@ async def delete_category(callback: CallbackQuery, state: FSMContext):
             MESSAGES["show_categories"],
             reply_markup=await get_categories_kb(categories, page=0)
         )
-        await callback.answer("Категория успешно удалена")
+        await callback.answer(MESSAGES["category_deleted"])
     else:
-        await callback.answer("Категория не найдена")
+        await callback.answer(MESSAGES["category_not_found"])
 
 
 @router.callback_query(F.data == "back_to_categories")
@@ -326,11 +325,11 @@ async def show_category_actions(callback: CallbackQuery, state: FSMContext):
     category = categories_dict.get(f"category_{cat_idx}")
     
     if not category:
-        await callback.answer("Категория не найдена")
+        await callback.answer(MESSAGES["category_not_found"])
         return
     
     await callback.message.edit_text(
-        f"Категория: {category}\nВыберите действие:",
+        MESSAGES["category_actions"].format(category=category),
         reply_markup=await get_category_actions_kb(cat_idx)
     )
     await callback.answer()

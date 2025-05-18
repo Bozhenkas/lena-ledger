@@ -7,6 +7,7 @@ from aiogram import Router, types, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters.command import Command
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 
 from keyboards.for_profile import get_profile_kb, get_settings_kb, get_confirm_reset_kb, get_back_kb
 from keyboards.for_start import get_menu_kb, get_start_kb  # Импортируем клавиатуру меню и для регистрации
@@ -22,6 +23,9 @@ MESSAGES_PATH = os.path.join(os.path.dirname(__file__), "messages.yaml")
 with open(MESSAGES_PATH, "r", encoding="utf-8") as file:
     MESSAGES = yaml.safe_load(file)
 
+# Определение состояний FSM
+class ProfileState(StatesGroup):
+    waiting_for_name = State()
 
 async def show_profile(message: Message, tg_id: int, state: FSMContext, edit_message: bool = False):
     """Обработчик команды /profile."""
@@ -35,22 +39,29 @@ async def show_profile(message: Message, tg_id: int, state: FSMContext, edit_mes
     categories = ", ".join(user["categories"]) if user["categories"] else "Нет категорий"
 
     # Получаем последние транзакции за последние 30 дней
-    end_date = datetime.now().date()
+    end_date = datetime.now()
     start_date = end_date - timedelta(days=30)
-    transactions = await get_transactions_by_period(tg_id, start_date.isoformat(), end_date.isoformat())
+    transactions = await get_transactions_by_period(
+        tg_id, 
+        start_date.strftime("%Y-%m-%d"), 
+        (end_date + timedelta(days=1)).strftime("%Y-%m-%d")
+    )
     
-    # Форматируем последние 3 транзакции
+    # Форматируем последние 5 транзакций
     transactions_text = ""
     if transactions:
-        # Сортируем транзакции по ID (последние первыми) и берем первые 3
-        sorted_transactions = sorted(transactions, key=lambda x: x.get('id', 0), reverse=True)[:3]
-        
-        for t in sorted_transactions:
-            type_text = "➕ Доход" if t['type'] == 0 else "➖ Расход"
-            category_text = f" ({t['category']})" if t['type'] == 1 and t['category'] else ""
-            transactions_text += f"\n{type_text}: {t['sum']} руб.{category_text}"
+        # Транзакции уже отсортированы по дате в запросе к БД, берем первые 5
+        latest_transactions = transactions[:5]
+        for t in latest_transactions:
+            try:
+                date = datetime.fromisoformat(t['date_time']).strftime("%d.%m")
+                type_text = "➕ Доход" if t['type'] == 0 else "➖ Расход"
+                category_text = f" ({t['category']})" if t['type'] == 1 and t['category'] else ""
+                transactions_text += f"\n{date} | {type_text}: {t['sum']} руб.{category_text}"
+            except (ValueError, KeyError) as e:
+                continue
     else:
-        transactions_text = "\nТранзакции не добавлены"
+        transactions_text = "\nТранзакции не найдены"
 
     profile_text = MESSAGES["profile"].format(
         name=name,
@@ -104,14 +115,18 @@ async def start_change_name(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text(MESSAGES["not_registered"], reply_markup=None)
         return
 
+    # Сохраняем message_id для последующего редактирования
+    await state.update_data(settings_message_id=callback.message.message_id)
+    
     await callback.message.edit_text(
         MESSAGES["request_new_name"],
         reply_markup=await get_back_kb("settings")
     )
+    await state.set_state(ProfileState.waiting_for_name)
     await callback.answer()
 
 
-@router.message(F.text, F.reply_to_message)
+@router.message(ProfileState.waiting_for_name)
 async def process_new_name(message: Message, state: FSMContext):
     """Обработка нового имени."""
     tg_id = message.from_user.id
@@ -119,11 +134,38 @@ async def process_new_name(message: Message, state: FSMContext):
         await message.answer(MESSAGES["not_registered"])
         return
 
-    new_name = message.text.strip()
-    await update_user(tg_id, name=new_name)
-    await message.answer(MESSAGES["name_updated"].format(new_name=new_name))
-    # Возвращаемся в профиль
-    await show_profile(message, tg_id, state)
+    try:
+        # Получаем сохраненный message_id
+        data = await state.get_data()
+        settings_message_id = data.get('settings_message_id')
+        
+        new_name = message.text.strip()
+        await update_user(tg_id, name=new_name)
+        
+        # Редактируем предыдущее сообщение
+        if settings_message_id:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=settings_message_id,
+                text=MESSAGES["name_updated"].format(new_name=new_name),
+                reply_markup=await get_settings_kb()
+            )
+        
+        # Удаляем сообщение пользователя с новым именем
+        await message.delete()
+        
+    except Exception as e:
+        print(f"Error in process_new_name: {e}")
+        if settings_message_id:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=settings_message_id,
+                text=MESSAGES["error_occurred"],
+                reply_markup=await get_settings_kb()
+            )
+    
+    # Очищаем состояние
+    await state.clear()
 
 
 @router.callback_query(F.data == "reset_data")

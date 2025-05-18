@@ -60,7 +60,7 @@ async def get_navigation_kb(period: str, start_date: str) -> InlineKeyboardMarku
             show_forward = (period == 'week' and start_date + timedelta(days=6) < today)
             # Декоративная кнопка для недели
             week_end = start_date + timedelta(days=6)
-            decorate_text = f"[{start_date.day}-{week_end.day}]"
+            decorate_text = f"[{start_date.day}.{start_date.month}-{week_end.day}.{week_end.month}]"
         else:  # month
             back_text = "Предыдущий месяц"
             forward_text = "Следующий месяц"

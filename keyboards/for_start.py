@@ -22,7 +22,8 @@ async def get_menu_kb() -> types.ReplyKeyboardMarkup:
     """создает клавиатуру главного меню со всеми основными функциями бота и опциями навигации."""
     kb = [
         [types.KeyboardButton(text="Потратил"), types.KeyboardButton(text="Получил")],
-        [types.KeyboardButton(text="Отчёт"), types.KeyboardButton(text="Анализ")],
+        [types.KeyboardButton(text="Отчёт"), types.KeyboardButton(text="Анализ [ИИ]"),
+         types.KeyboardButton(text="Прогноз [ИИ]")],
         [types.KeyboardButton(text="Категории"), types.KeyboardButton(text="Лимиты")],
         [types.KeyboardButton(text="Профиль")],
 

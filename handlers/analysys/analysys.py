@@ -10,7 +10,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from keyboards.for_analysys import get_period_kb, get_retry_kb
-from database.db_methods import get_transactions_by_period, get_user
+from database.db_methods import get_transactions_by_period, get_user, get_user_limits
 from keyboards.for_start import get_menu_kb
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
@@ -24,7 +24,6 @@ router = Router()
 
 # Загрузка сообщений из YAML с обработкой ошибок
 MESSAGES_PATH = os.path.join(os.path.dirname(__file__), 'messages.yaml')
-print(f"Loading messages from: {MESSAGES_PATH}")
 try:
     with open(MESSAGES_PATH, 'r', encoding='utf-8') as file:
         MESSAGES = yaml.safe_load(file)
@@ -43,7 +42,7 @@ class AnalysisState(StatesGroup):
 
 
 @router.message(Command('analysys'))
-@router.message(F.text == 'Анализ')
+@router.message(F.text == 'Анализ [ИИ]')
 async def cmd_analysys(message: types.Message, state: FSMContext):
     """Обработчик команды /analysys и кнопки 'Анализ'."""
     await message.answer(MESSAGES['analysys_emoji'], reply_markup=types.ReplyKeyboardRemove(),
@@ -85,7 +84,7 @@ async def process_period_selection(callback: types.CallbackQuery, state: FSMCont
         elif period == '12_months':
             start_date = today - timedelta(days=365)
         else:
-            await callback.message.answer('Неверный период')
+            await callback.message.answer(MESSAGES['invalid_period'])
             return
 
         end_date = today + timedelta(days=1)
@@ -98,20 +97,18 @@ async def process_period_selection(callback: types.CallbackQuery, state: FSMCont
         await show_analysis(callback, state)
 
     except Exception as e:
-        print(f"Error in process_period_selection: {str(e)}")
         try:
             temp_message_id = (await state.get_data()).get('temp_message_id')
             if temp_message_id:
                 await callback.message.bot.edit_message_text(
-                    text="Произошла ошибка, попробуйте позже.",
+                    text=MESSAGES['error_occurred'],
                     chat_id=callback.message.chat.id,
                     message_id=temp_message_id
                 )
             else:
-                await callback.message.answer("Произошла ошибка, попробуйте позже.")
-        except Exception as e:
-            print(f"Error editing message in process_period_selection: {str(e)}")
-            await callback.message.answer("Произошла ошибка, попробуйте позже.")
+                await callback.message.answer(MESSAGES['error_occurred'])
+        except Exception:
+            await callback.message.answer(MESSAGES['error_occurred'])
         await state.set_state(AnalysisState.select_period)
 
 
@@ -125,22 +122,22 @@ async def fetch_deepseek_analysis(data: dict) -> str:
     try:
         # Формирование промпта для DeepSeek
         prompt = (
-            "Ты финансовый аналитик. Проанализируй данные о доходах и расходах пользователя и дай прогноз расходов на следующий месяц, "
-            "а также рекомендации по оптимизации бюджета. Данные:\n"
+            "Ты финансовый аналитик. Проанализируй данные о доходах и расходах пользователя "
+            "и дай рекомендации по оптимизации бюджета. Данные:\n"
             f"- Доход за период: {data['income']} руб.\n"
             f"- Общие расходы: {data['total_expenses']} руб.\n"
             f"- Расходы по категориям: {data['expenses_by_category']}.\n"
             f"- Период анализа: {data['period_months']} месяцев.\n\n"
-            "Прогноз:\n"
-            "- Рассчитай средние месячные расходы по каждой категории.\n"
-            "- Спрогнозируй расходы на следующий месяц, учитывая возможный рост на 5% из-за инфляции.\n"
+            "Анализ:\n"
+            "- Рассчитай средние месячные расходы по каждой категории\n"
+            "- Укажи процент от общих расходов для каждой категории\n"
             "Рекомендации:\n"
-            "- Если расходы по категории превышают 30% дохода, предложи сократить их.\n"
-            "- Если расходы превышают доходы, предложи общие меры экономии.\n"
+            "- Если расходы по категории превышают 30% дохода, предложи сократить их\n"
+            "- Если расходы превышают доходы, предложи общие меры экономии\n"
             "Верни ответ в структурированном виде без использования HTML, Markdown или любой другой разметки. "
             "Форматируй ответ только с помощью переносов строк. Пример формата:\n"
-            "Прогноз на следующий месяц:\n"
-            "- Категория: сумма руб.\n"
+            "Анализ расходов:\n"
+            "- Категория: сумма руб. (процент)\n"
             "...\n"
             "Рекомендации:\n"
             "- Мера 1\n"
@@ -151,7 +148,7 @@ async def fetch_deepseek_analysis(data: dict) -> str:
             model="deepseek/deepseek-r1:free",
             messages=[
                 {"role": "system",
-                 "content": "Ты финансовый аналитик, предоставляющий точные прогнозы и рекомендации."},
+                 "content": "Ты финансовый аналитик, предоставляющий точные рекомендации по управлению бюджетом."},
                 {"role": "user", "content": prompt}
             ],
             stream=False
@@ -159,7 +156,6 @@ async def fetch_deepseek_analysis(data: dict) -> str:
 
         # Очистка ответа от любой разметки
         response_text = response.choices[0].message.content
-        print(f"Raw OpenRouter response: {response_text}")
 
         # Удаляем HTML-теги
         cleaned_text = re.sub(r'<.*?>', '', response_text)
@@ -168,13 +164,10 @@ async def fetch_deepseek_analysis(data: dict) -> str:
         # Заменяем \n на реальные переносы строк
         cleaned_text = cleaned_text.replace('\\n', '\n')
 
-        print(f"Cleaned response: {cleaned_text}")
         return cleaned_text
 
     except Exception as e:
-        error_msg = f"Ошибка при запросе к OpenRouter: {str(e)}"
-        print(error_msg)
-        return error_msg
+        return f"Ошибка при запросе к OpenRouter: {str(e)}"
 
 
 async def show_analysis(callback: types.CallbackQuery, state: FSMContext):
@@ -200,23 +193,26 @@ async def show_analysis(callback: types.CallbackQuery, state: FSMContext):
                 category = t['category'] or 'Без категории'
                 expenses_by_category[category] = expenses_by_category.get(category, 0) + t['sum']
 
-        # Подготовка данных для DeepSeek
+        # Проверяем наличие лимитов у пользователя
+        user_limits = await get_user_limits(tg_id)
+
+        # Подготовка данных для анализа
         analysis_data = {
             "income": income,
             "total_expenses": expenses,
             "expenses_by_category": expenses_by_category,
-            "period_months": {"3_months": 3, "6_months": 6, "12_months": 12}[period]
+            "period_months": {"3_months": 3, "6_months": 6, "12_months": 12}[period],
+            "has_limits": bool(user_limits)  # True если есть лимиты, False если нет
         }
 
-        # Запрос к DeepSeek
+        # Запрос анализа
         analysis_text = await fetch_deepseek_analysis(analysis_data)
 
         # Формирование текста ответа
-        period_display = {"3_months": "3 месяца", "6_months": "6 месяцев", "12_months": "12 месяцев"}[period]
         if analysis_text.startswith("Ошибка"):
             response_text = (
                     MESSAGES['analysis'].format(
-                        period=period_display,
+                        period={"3_months": "3 месяца", "6_months": "6 месяцев", "12_months": "12 месяцев"}[period],
                         income=income,
                         expenses=expenses,
                         analysis=""
@@ -224,7 +220,7 @@ async def show_analysis(callback: types.CallbackQuery, state: FSMContext):
             )
         else:
             response_text = MESSAGES['analysis'].format(
-                period=period_display,
+                period={"3_months": "3 месяца", "6_months": "6 месяцев", "12_months": "12 месяцев"}[period],
                 income=income,
                 expenses=expenses,
                 analysis=analysis_text
@@ -239,15 +235,14 @@ async def show_analysis(callback: types.CallbackQuery, state: FSMContext):
         )
 
     except Exception as e:
-        print(f"Error in show_analysis: {str(e)}")
         try:
             await callback.message.bot.edit_message_text(
-                text="Произошла ошибка, попробуйте позже.",
+                text=MESSAGES['error_occurred'],
                 chat_id=callback.message.chat.id,
                 message_id=temp_message_id
             )
         except Exception as e:
             print(f"Error editing message in show_analysis: {str(e)}")
-            await callback.message.answer("Произошла ошибка, попробуйте позже.")
+            await callback.message.answer(MESSAGES['error_occurred'])
 
     await state.set_state(AnalysisState.view_analysis)
