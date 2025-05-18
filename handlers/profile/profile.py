@@ -23,9 +23,11 @@ MESSAGES_PATH = os.path.join(os.path.dirname(__file__), "messages.yaml")
 with open(MESSAGES_PATH, "r", encoding="utf-8") as file:
     MESSAGES = yaml.safe_load(file)
 
+
 # Определение состояний FSM
 class ProfileState(StatesGroup):
     waiting_for_name = State()
+
 
 async def show_profile(message: Message, tg_id: int, state: FSMContext, edit_message: bool = False):
     """Обработчик команды /profile."""
@@ -42,11 +44,11 @@ async def show_profile(message: Message, tg_id: int, state: FSMContext, edit_mes
     end_date = datetime.now()
     start_date = end_date - timedelta(days=30)
     transactions = await get_transactions_by_period(
-        tg_id, 
-        start_date.strftime("%Y-%m-%d"), 
+        tg_id,
+        start_date.strftime("%Y-%m-%d"),
         (end_date + timedelta(days=1)).strftime("%Y-%m-%d")
     )
-    
+
     # Форматируем последние 5 транзакций
     transactions_text = ""
     if transactions:
@@ -117,7 +119,7 @@ async def start_change_name(callback: CallbackQuery, state: FSMContext):
 
     # Сохраняем message_id для последующего редактирования
     await state.update_data(settings_message_id=callback.message.message_id)
-    
+
     await callback.message.edit_text(
         MESSAGES["request_new_name"],
         reply_markup=await get_back_kb("settings")
@@ -138,10 +140,11 @@ async def process_new_name(message: Message, state: FSMContext):
         # Получаем сохраненный message_id
         data = await state.get_data()
         settings_message_id = data.get('settings_message_id')
-        
         new_name = message.text.strip()
+
+
         await update_user(tg_id, name=new_name)
-        
+
         # Редактируем предыдущее сообщение
         if settings_message_id:
             await message.bot.edit_message_text(
@@ -150,10 +153,10 @@ async def process_new_name(message: Message, state: FSMContext):
                 text=MESSAGES["name_updated"].format(new_name=new_name),
                 reply_markup=await get_settings_kb()
             )
-        
+
         # Удаляем сообщение пользователя с новым именем
         await message.delete()
-        
+
     except Exception as e:
         print(f"Error in process_new_name: {e}")
         if settings_message_id:
@@ -163,7 +166,7 @@ async def process_new_name(message: Message, state: FSMContext):
                 text=MESSAGES["error_occurred"],
                 reply_markup=await get_settings_kb()
             )
-    
+
     # Очищаем состояние
     await state.clear()
 
@@ -239,5 +242,5 @@ async def handle_back(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer(MESSAGES["to_menu"], reply_markup=await get_menu_kb())
         # Очищаем состояние
         await state.clear()
-    
+
     await callback.answer()
