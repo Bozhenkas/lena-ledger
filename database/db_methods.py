@@ -4,6 +4,7 @@ import aiosqlite
 import json
 from typing import Optional, Dict, Any, List
 from datetime import datetime
+from aiogram import Bot
 
 # Путь к базе данных
 DB_PATH = "database/data.db"
@@ -110,7 +111,7 @@ async def delete_user(tg_id: int) -> bool:
 
 
 async def add_transaction(tg_id: int, type_: int, sum_: float, category: Optional[str] = None,
-                          description: Optional[str] = None) -> int:
+                          description: Optional[str] = None, bot: Optional[Bot] = None) -> int:
     """
     добавление новой транзакции в базу данных.
 
@@ -120,18 +121,82 @@ async def add_transaction(tg_id: int, type_: int, sum_: float, category: Optiona
         sum_ (float): Сумма транзакции (положительное число).
         category (Optional[str]): Категория транзакции, должна быть в users.categories или None.
         description (Optional[str]): Описание транзакции, может быть None.
+        bot (Optional[Bot]): Экземпляр бота для отправки уведомлений о лимитах.
 
     возвращает:
         int: ID добавленной транзакции.
     """
     async with aiosqlite.connect(DB_PATH) as db:
+        # Сначала добавляем транзакцию
         date_time = datetime.now().isoformat()
         cursor = await db.execute(
             "INSERT INTO transactions (tg_id, date_time, type, description, category, sum) VALUES (?, ?, ?, ?, ?, ?)",
             (tg_id, date_time, type_, description, category, sum_)
         )
         await db.commit()
-        return cursor.lastrowid
+        transaction_id = cursor.lastrowid
+
+        # Проверяем лимиты только для расходов
+        if type_ == 1 and category and bot:
+            # Получаем активный лимит для категории
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """
+                SELECT * FROM limits 
+                WHERE tg_id = ? 
+                AND category = ? 
+                AND date('now') BETWEEN date(start_date) AND date(end_date)
+                """,
+                (tg_id, category)
+            )
+            limit = await cursor.fetchone()
+
+            if limit:
+                # Получаем сумму расходов за период лимита
+                cursor = await db.execute(
+                    """
+                    SELECT COALESCE(SUM(sum), 0) as total
+                    FROM transactions
+                    WHERE tg_id = ? 
+                    AND category = ?
+                    AND type = 1
+                    AND date(date_time) BETWEEN date(?) AND date(?)
+                    """,
+                    (tg_id, category, limit['start_date'], limit['end_date'])
+                )
+                current_spent = float((await cursor.fetchone())[0])
+                limit_sum = float(limit['limit_sum'])
+                
+                # Проверяем превышение лимита
+                if current_spent > limit_sum:
+                    over_limit = current_spent - limit_sum
+                    # Отправляем уведомление о превышении лимита
+                    await bot.send_message(
+                        tg_id,
+                        f"🚨 <b>Внимание! Превышен лимит расходов!</b>\n\n"
+                        f"Категория: {category}\n"
+                        f"Установленный лимит: {limit_sum:,.2f}₽\n"
+                        f"Текущие расходы: {current_spent:,.2f}₽\n"
+                        f"Превышение: {over_limit:,.2f}₽\n"
+                        f"Период: {limit['start_date']} - {limit['end_date']}",
+                        parse_mode="HTML"
+                    )
+                elif (current_spent / limit_sum) >= 0.9:  # 90% и более
+                    remaining = limit_sum - current_spent
+                    # Отправляем уведомление о приближении к лимиту
+                    await bot.send_message(
+                        tg_id,
+                        f"⚠️ <b>Внимание! Вы приближаетесь к лимиту расходов!</b>\n\n"
+                        f"Категория: {category}\n"
+                        f"Установленный лимит: {limit_sum:,.2f}₽\n"
+                        f"Текущие расходы: {current_spent:,.2f}₽\n"
+                        f"Остаток: {remaining:,.2f}₽\n"
+                        f"Использовано: {(current_spent / limit_sum * 100):.1f}%\n"
+                        f"Период: {limit['start_date']} - {limit['end_date']}",
+                        parse_mode="HTML"
+                    )
+
+        return transaction_id
 
 
 async def get_transactions(tg_id: int, limit: int = 10) -> List[Dict[str, Any]]:
@@ -169,14 +234,37 @@ async def add_limit(tg_id: int, start_date: str, end_date: str, category: str, l
     """Добавление нового лимита для пользователя"""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute(
-                "INSERT INTO limits (tg_id, start_date, end_date, category, limit_sum) VALUES (?, ?, ?, ?, ?)",
-                (tg_id, start_date, end_date, category, limit_sum)
+            # Проверяем, нет ли уже активного лимита для этой категории
+            cursor = await db.execute(
+                """
+                SELECT COUNT(*) FROM limits 
+                WHERE tg_id = ? 
+                AND category = ? 
+                AND date('now') BETWEEN date(start_date) AND date(end_date)
+                """,
+                (tg_id, category)
             )
+            count = (await cursor.fetchone())[0]
+            if count > 0:
+                # Обновляем существующий лимит
+                await db.execute(
+                    """
+                    UPDATE limits 
+                    SET limit_sum = ?, start_date = ?, end_date = ?
+                    WHERE tg_id = ? AND category = ? AND date('now') BETWEEN date(start_date) AND date(end_date)
+                    """,
+                    (limit_sum, start_date, end_date, tg_id, category)
+                )
+            else:
+                # Добавляем новый лимит
+                await db.execute(
+                    "INSERT INTO limits (tg_id, start_date, end_date, category, limit_sum) VALUES (?, ?, ?, ?, ?)",
+                    (tg_id, start_date, end_date, category, limit_sum)
+                )
+            
             await db.commit()
             return True
     except Exception as e:
-        print(f"Error adding limit: {e}")
         return False
 
 
@@ -215,13 +303,14 @@ async def get_limit_usage(tg_id: int, category: str, start_date: str, end_date: 
             FROM transactions
             WHERE tg_id = ? 
             AND category = ?
-            AND date_time BETWEEN ? AND ?
             AND type = 1
+            AND date(date_time) BETWEEN date(?) AND date(?)
             """,
             (tg_id, category, start_date, end_date)
         )
         result = await cursor.fetchone()
-        return float(result[0])
+        total = float(result[0])
+        return total
 
 
 async def is_registered(tg_id: int) -> bool:
@@ -330,18 +419,26 @@ async def check_limit_violation(tg_id: int, category: str, amount: float) -> Opt
     """
     Проверка нарушения лимита при добавлении новой транзакции.
     
-    Возвращает информацию о нарушенном лимите или None, если лимиты не нарушены.
+    Возвращает:
+    - None: если лимит не нарушен и не приближается к нарушению
+    - Dict с информацией о лимите и статусом:
+        - status: "violated" если лимит превышен
+        - status: "approaching" если использовано более 90% лимита
     """
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
+        
+        # Получаем текущую дату в формате YYYY-MM-DD
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        
         cursor = await db.execute(
             """
             SELECT * FROM limits 
             WHERE tg_id = ? 
             AND category = ? 
-            AND date('now') BETWEEN start_date AND end_date
+            AND date(?) BETWEEN date(start_date) AND date(end_date)
             """,
-            (tg_id, category)
+            (tg_id, category, current_date)
         )
         limit = await cursor.fetchone()
         
@@ -349,22 +446,50 @@ async def check_limit_violation(tg_id: int, category: str, amount: float) -> Opt
             return None
             
         # Получаем сумму расходов за период лимита
-        current_spent = await get_limit_usage(
-            tg_id, 
-            category, 
-            limit["start_date"], 
-            limit["end_date"]
+        cursor = await db.execute(
+            """
+            SELECT COALESCE(SUM(sum), 0) as total
+            FROM transactions
+            WHERE tg_id = ? 
+            AND category = ?
+            AND type = 1
+            AND date(date_time) BETWEEN date(?) AND date(?)
+            """,
+            (tg_id, category, limit["start_date"], limit["end_date"])
         )
+        current_spent = float((await cursor.fetchone())[0])
         
         # Проверяем, не будет ли превышен лимит после новой транзакции
-        if current_spent + amount > limit["limit_sum"]:
+        new_total = current_spent + amount
+        limit_sum = float(limit["limit_sum"])
+        
+        # Рассчитываем процент использования после новой транзакции
+        usage_percent = (new_total / limit_sum) * 100
+        
+        if new_total > limit_sum:
             return {
+                "status": "violated",
                 "category": category,
-                "limit_sum": limit["limit_sum"],
+                "limit_sum": limit_sum,
                 "current_spent": current_spent,
                 "new_amount": amount,
-                "end_date": limit["end_date"]
+                "end_date": limit["end_date"],
+                "total_amount": new_total,
+                "over_limit": new_total - limit_sum,
+                "usage_percent": usage_percent
             }
+        elif usage_percent >= 90:  # Если использовано 90% или более
+            return {
+                "status": "approaching",
+                "category": category,
+                "limit_sum": limit_sum,
+                "current_spent": current_spent,
+                "new_amount": amount,
+                "end_date": limit["end_date"],
+                "remaining": limit_sum - new_total,
+                "usage_percent": usage_percent
+            }
+            
         return None
 
 
@@ -464,3 +589,71 @@ async def get_transactions_by_category(tg_id: int, category: str, page: int = 0,
             for row in rows
         ]
         return transactions
+
+
+async def check_limit(tg_id: int, category: str, bot: Bot) -> None:
+    """
+    Проверка лимитов после добавления транзакции и отправка уведомлений.
+    
+    Аргументы:
+        tg_id (int): Telegram ID пользователя
+        category (str): Категория транзакции
+        bot (Bot): Экземпляр бота для отправки сообщений
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        
+        # Получаем активный лимит для категории
+        cursor = await db.execute(
+            """
+            SELECT * FROM limits 
+            WHERE tg_id = ? 
+            AND category = ? 
+            AND date('now') BETWEEN start_date AND end_date
+            """,
+            (tg_id, category)
+        )
+        limit = await cursor.fetchone()
+        
+        if not limit:
+            return  # Нет активного лимита для этой категории
+            
+        # Получаем сумму расходов за период лимита
+        current_spent = await get_limit_usage(
+            tg_id, 
+            category, 
+            limit["start_date"], 
+            limit["end_date"]
+        )
+        
+        limit_sum = limit["limit_sum"]
+        usage_percent = (current_spent / limit_sum) * 100
+        
+        # Формируем сообщения в зависимости от процента использования
+        if current_spent > limit_sum:
+            # Лимит превышен
+            over_limit = current_spent - limit_sum
+            await bot.send_message(
+                tg_id,
+                f"🚨 <b>Внимание! Превышен лимит расходов!</b>\n\n"
+                f"Категория: {category}\n"
+                f"Установленный лимит: {limit_sum:,.2f}₽\n"
+                f"Текущие расходы: {current_spent:,.2f}₽\n"
+                f"Превышение: {over_limit:,.2f}₽\n"
+                f"Период: с {limit['start_date']} по {limit['end_date']}",
+                parse_mode="HTML"
+            )
+        elif usage_percent >= 90:
+            # Приближаемся к лимиту (90% и более)
+            remaining = limit_sum - current_spent
+            await bot.send_message(
+                tg_id,
+                f"⚠️ <b>Внимание! Вы приближаетесь к лимиту расходов!</b>\n\n"
+                f"Категория: {category}\n"
+                f"Установленный лимит: {limit_sum:,.2f}₽\n"
+                f"Текущие расходы: {current_spent:,.2f}₽\n"
+                f"Остаток: {remaining:,.2f}₽\n"
+                f"Использовано: {usage_percent:.1f}%\n"
+                f"Период: с {limit['start_date']} по {limit['end_date']}",
+                parse_mode="HTML"
+            )

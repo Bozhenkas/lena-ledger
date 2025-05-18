@@ -14,7 +14,8 @@ from keyboards.for_limits import (
     get_period_keyboard,
     get_limit_actions_keyboard,
     get_confirm_delete_keyboard,
-    get_limits_list_keyboard
+    get_limits_list_keyboard,
+    get_categories_for_limits_kb
 )
 from keyboards.for_categories import get_categories_kb
 from keyboards.for_start import get_menu_kb
@@ -142,7 +143,7 @@ async def process_amount(message: Message, state: FSMContext):
 
         # Получаем категории пользователя и создаем клавиатуру
         categories = await get_categories(message.from_user.id)
-        keyboard = await get_categories_kb(categories, page=0)
+        keyboard = await get_categories_for_limits_kb(categories, page=0)
 
         await message.answer(MESSAGES["select_category"], reply_markup=keyboard)
 
@@ -153,59 +154,71 @@ async def process_amount(message: Message, state: FSMContext):
 @router.callback_query(LimitStates.CHOOSING_CATEGORY)
 async def process_category_selection(callback: CallbackQuery, state: FSMContext):
     """Обработка выбора категории"""
-    if callback.data not in ["next_page", "prev_page"]:
+    if callback.data.startswith("limit_category_"):
         try:
             data = await state.get_data()
-            category = callback.data
-
-            # Проверяем, что категория существует в списке категорий пользователя
+            # Получаем индекс категории из callback_data
+            category_idx = int(callback.data.split("_")[2])
+            
+            # Получаем список категорий пользователя
             user_categories = await get_categories(callback.from_user.id)
-            if category in user_categories:
-                if await add_limit(
-                    callback.from_user.id,
-                    data["start_date"],
-                    data["end_date"],
-                    category,
-                    data["amount"]
-                ):
-                    await callback.message.edit_text(
-                        MESSAGES["limit_added"].format(
-                            category=category,
-                            amount=data["amount"],
-                            start_date=data["start_date"],
-                            end_date=data["end_date"]
-                        ),
-                        reply_markup=get_limit_actions_keyboard()
-                    )
-                else:
-                    await callback.message.edit_text(
-                        MESSAGES["error_add_limit"],
-                        reply_markup=get_limit_actions_keyboard()
-                    )
+            
+            # Проверяем, что индекс находится в допустимом диапазоне
+            if 0 <= category_idx < len(user_categories):
+                category = user_categories[category_idx]
+                try:
+                    if await add_limit(
+                        callback.from_user.id,
+                        data["start_date"],
+                        data["end_date"],
+                        category,
+                        data["amount"]
+                    ):
+                        await callback.message.edit_text(
+                            MESSAGES["limit_added"].format(
+                                category=category,
+                                amount=data["amount"],
+                                start_date=data["start_date"],
+                                end_date=data["end_date"]
+                            ),
+                            reply_markup=get_limit_actions_keyboard()
+                        )
+                    else:
+                        await callback.message.edit_text(
+                            MESSAGES["error_add_limit"],
+                            reply_markup=get_limit_actions_keyboard()
+                        )
+                except Exception as e:
+                    if "Category not found in user categories" in str(e):
+                        # Если категория не найдена в базе, показываем специальное сообщение
+                        await callback.message.edit_text(
+                            MESSAGES["error_category_not_found"],
+                            reply_markup=get_limit_actions_keyboard()
+                        )
+                    else:
+                        # Для других ошибок показываем общее сообщение об ошибке
+                        await callback.message.edit_text(
+                            MESSAGES["error_add_limit"],
+                            reply_markup=get_limit_actions_keyboard()
+                        )
             else:
                 await callback.message.edit_text(
                     MESSAGES["error_category_not_found"],
                     reply_markup=get_limit_actions_keyboard()
                 )
-        except ValueError:
+        except (ValueError, IndexError):
             await callback.message.edit_text(
                 MESSAGES["error_process_category"],
                 reply_markup=get_limit_actions_keyboard()
             )
         
         await state.clear()
-    elif callback.data == "next_page" or callback.data == "prev_page":
+    elif callback.data.startswith("limit_page_"):
         # Обработка пагинации категорий
-        current_page = int(callback.message.reply_markup.inline_keyboard[-1][0].callback_data.split("_")[-1])
-        new_page = current_page + 1 if callback.data == "next_page" else current_page - 1
-        
-        categories = await get_categories(callback.from_user.id)
-        keyboard = await get_categories_kb(categories, page=new_page)
-        
-        await callback.message.edit_text(
-            MESSAGES["select_category"],
-            reply_markup=keyboard
-        )
+        page = int(callback.data.split("_")[2])
+        user_categories = await get_categories(callback.from_user.id)
+        keyboard = await get_categories_for_limits_kb(user_categories, page=page)
+        await callback.message.edit_reply_markup(reply_markup=keyboard)
 
 
 @router.callback_query(F.data == "limit_list")
@@ -306,3 +319,4 @@ async def process_delete_cancellation(callback: CallbackQuery, state: FSMContext
         MESSAGES["operation_cancelled"],
         reply_markup=get_limit_actions_keyboard()
     )
+ 

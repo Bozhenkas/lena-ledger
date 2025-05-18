@@ -79,39 +79,87 @@ async def process_amount(message: types.Message, state: FSMContext):
 # Обработка выбора категории (только для расходов)
 @router.callback_query(TransactionState.select_category)
 async def process_category(callback: types.CallbackQuery, state: FSMContext):
-    category = callback.data
+    print(f"[DEBUG] Processing category selection. Callback data: {callback.data}")
+    # Получаем индекс категории из callback_data
+    category_data = callback.data.split('_')
+    if len(category_data) != 3 or category_data[0] != "trans" or category_data[1] != "cat":
+        await callback.message.edit_text("Ошибка при выборе категории")
+        await state.clear()
+        return
+        
+    try:
+        category_index = int(category_data[2])
+        # Получаем список категорий пользователя
+        categories = await get_categories(callback.from_user.id)
+        print(f"[DEBUG] User categories: {categories}")
+        print(f"[DEBUG] Selected category index: {category_index}")
+        
+        if not categories or category_index >= len(categories):
+            await callback.message.edit_text("Ошибка: категория не найдена")
+            await state.clear()
+            return
+            
+        category = categories[category_index]
+        print(f"[DEBUG] Selected category name: {category}")
+    except (ValueError, IndexError) as e:
+        print(f"[DEBUG] Error processing category selection: {e}")
+        await callback.message.edit_text("Ошибка при выборе категории")
+        await state.clear()
+        return
+
     await state.update_data(category=category)
     data = await state.get_data()
+    print(f"[DEBUG] State data after category selection: {data}")
     
     # Проверка лимитов
     if data['type_'] == 1:  # Только для расходов
-        limit_violation = await check_limit_violation(
+        limit_check = await check_limit_violation(
             callback.from_user.id,
             category,
             data['amount']
         )
+        print(f"[DEBUG] Limit check result: {limit_check}")
         
-        if limit_violation:
-            # Если есть нарушение лимита, показываем предупреждение
-            total_amount = limit_violation['current_spent'] + data['amount']
-            over_limit = total_amount - limit_violation['limit_sum']
-            
-            text = MESSAGES['limit_warning'].format(
-                category=category,
-                limit_sum=limit_violation['limit_sum'],
-                current_spent=limit_violation['current_spent'],
-                new_amount=data['amount'],
-                total_amount=total_amount,
-                over_limit=over_limit
-            )
-            keyboard = await get_confirm_kb()
-            await callback.message.edit_text(text, reply_markup=keyboard)
-            await state.set_state(TransactionState.confirm_limit_override)
-            return
+        if limit_check:
+            if limit_check["status"] == "violated":
+                # Если есть нарушение лимита, показываем предупреждение
+                text = MESSAGES['limit_warning'].format(
+                    category=category,
+                    limit_sum=round(limit_check['limit_sum'], 2),
+                    current_spent=round(limit_check['current_spent'], 2),
+                    new_amount=round(data['amount'], 2),
+                    total_amount=round(limit_check['total_amount'], 2),
+                    over_limit=round(limit_check['over_limit'], 2)
+                )
+                keyboard = await get_confirm_kb()
+                await callback.message.edit_text(text, reply_markup=keyboard)
+                await state.set_state(TransactionState.confirm_limit_override)
+                return
+            elif limit_check["status"] == "approaching":
+                # Если приближаемся к лимиту, показываем информационное сообщение
+                text = MESSAGES['limit_approaching'].format(
+                    category=category,
+                    limit_sum=round(limit_check['limit_sum'], 2),
+                    current_spent=round(limit_check['current_spent'], 2),
+                    new_amount=round(data['amount'], 2),
+                    remaining=round(limit_check['remaining'], 2),
+                    usage_percent=round(limit_check['usage_percent'], 1)
+                )
+                # Отправляем информационное сообщение
+                await callback.message.answer(text)
+                # Продолжаем с обычным подтверждением транзакции
+                text = MESSAGES['confirm_transaction'].format(
+                    amount=round(data['amount'], 2),
+                    category=f"\nКатегория: {category}"
+                )
+                keyboard = await get_confirm_kb()
+                await callback.message.edit_text(text, reply_markup=keyboard)
+                await state.set_state(TransactionState.confirm_transaction)
+                return
 
     # Если нет нарушения лимита, показываем обычное подтверждение
     text = MESSAGES['confirm_transaction'].format(
-        amount=data['amount'],
+        amount=round(data['amount'], 2),
         category=f"\nКатегория: {category}" if data['type_'] == 1 else ''
     )
     keyboard = await get_confirm_kb()
@@ -127,14 +175,35 @@ async def process_confirm(callback: types.CallbackQuery, state: FSMContext):
         tg_id = callback.from_user.id
         type_ = data['type_']
         amount = data['amount']
-        category = data.get('category') if type_ == 1 else None  # Категория только для расходов
+        category = data.get('category')
 
-        transaction_id = await add_transaction(tg_id, type_, amount, category)
+        # Добавляем транзакцию и проверяем лимиты
+        transaction_id = await add_transaction(
+            tg_id=tg_id, 
+            type_=type_, 
+            sum_=amount, 
+            category=category,
+            bot=callback.bot  # Передаем экземпляр бота
+        )
+        
         if transaction_id:
-            await callback.message.edit_text('Транзакция успешно добавлена!')
+            # Проверяем лимит еще раз после добавления транзакции
+            if type_ == 1 and category:  # Только для расходов
+                limit_check = await check_limit_violation(tg_id, category, amount)
+                
+                if limit_check and limit_check["status"] == "violated":
+                    await callback.message.edit_text(
+                        '✅ Транзакция добавлена!\n\n'
+                        '⚠️ Внимание! Превышен лимит по категории:\n'
+                        f'Категория: {category}\n'
+                        f'Превышение: {limit_check["over_limit"]:,.2f}₽'
+                    )
+                    return
+                
+            await callback.message.edit_text('✅ Транзакция успешно добавлена!')
         else:
-            await callback.message.edit_text('Ошибка при добавлении транзакции.')
+            await callback.message.edit_text('❌ Ошибка при добавлении транзакции.')
     else:
-        await callback.message.edit_text('Добавление транзакции отменено.')
+        await callback.message.edit_text('❌ Добавление транзакции отменено.')
 
     await state.clear()

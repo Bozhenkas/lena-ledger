@@ -56,7 +56,7 @@ async def update_user_categories(
         
         # Объединяем текущие и новые категории
         updated_categories = current_categories + selected_new_categories
-        
+
         # Сохраняем обновленный список категорий в БД
         categories_json = json.dumps(updated_categories, ensure_ascii=False)
         await db.execute(
@@ -64,7 +64,7 @@ async def update_user_categories(
             (categories_json, tg_id)
         )
         await db.commit()
-        
+
         print(f"Добавлены новые категории: {selected_new_categories}")
         return updated_categories
     
@@ -81,8 +81,8 @@ async def generate_random_transactions(
     # Определяем временной период
     end_date = datetime.now()
     start_date = end_date - timedelta(days=DAYS_BACK)
-    time_delta = end_date - start_date
-    
+        time_delta = end_date - start_date
+
     # Счетчики для статистики
     added_transactions = 0
     total_income = 0
@@ -94,7 +94,7 @@ async def generate_random_transactions(
             random_seconds = random.randint(0, int(time_delta.total_seconds()))
             transaction_date = start_date + timedelta(seconds=random_seconds)
             date_time = transaction_date.strftime("%Y-%m-%d %H:%M:%S")
-            
+
             # Генерируем данные транзакции
             trans_type = random.randint(0, 1)  # 0=доход, 1=расход
             amount = round(random.uniform(MIN_AMOUNT, MAX_AMOUNT), 2)
@@ -125,8 +125,8 @@ async def generate_random_transactions(
         except Exception as e:
             print(f"Ошибка при добавлении транзакции {i+1}: {str(e)}")
             continue
-    
-    await db.commit()
+
+        await db.commit()
     
     # Выводим итоговую статистику
     print(f"\nИтоги генерации данных:")

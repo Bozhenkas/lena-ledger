@@ -2,6 +2,7 @@
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from math import ceil
 
 
 def get_period_keyboard() -> InlineKeyboardMarkup:
@@ -57,3 +58,29 @@ def get_limits_list_keyboard(limits: list) -> InlineKeyboardMarkup:
         ))
     builder.adjust(1)
     return builder.as_markup()
+
+
+async def get_categories_for_limits_kb(categories: list, page: int = 0) -> InlineKeyboardMarkup:
+    """создает постраничную клавиатуру категорий специально для лимитов."""
+    items_per_page = 5
+    total_pages = ceil(len(categories) / items_per_page)
+
+    start_idx = page * items_per_page
+    end_idx = min(start_idx + items_per_page, len(categories))
+    current_categories = categories[start_idx:end_idx]
+
+    kb = []
+    for i, category in enumerate(current_categories, start=start_idx):
+        kb.append([InlineKeyboardButton(text=f"📊 {category}", callback_data=f"limit_category_{i}")])
+
+    # Добавляем навигационные кнопки, если нужно
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton(text=f"⬅️ [{page + 1}/{total_pages}]", callback_data=f"limit_page_{page - 1}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton(text=f"[{page + 1}/{total_pages}] ➡️", callback_data=f"limit_page_{page + 1}"))
+    if nav_row:
+        kb.append(nav_row)
+
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+ 

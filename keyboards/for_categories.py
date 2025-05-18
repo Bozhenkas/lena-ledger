@@ -9,7 +9,7 @@ async def get_add_category_kb() -> ReplyKeyboardMarkup:
     kb = [
         [KeyboardButton(text="Добавить категорию")],
         [KeyboardButton(text="Назад ↩️")],
-    ]
+          ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
 

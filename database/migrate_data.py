@@ -1,11 +1,12 @@
-"""скрипт создания структуры базы данных с таблицами пользователей, транзакций и лимитов."""
+"""Скрипт для миграции данных из резервной копии в новую базу данных"""
 
-import aiosqlite
 import asyncio
+import aiosqlite
+import json
+from datetime import datetime
 
-async def create_database():
-    # SQL-скрипт для создания базы
-    schema: str = """
+# SQL-скрипт для создания структуры базы данных
+SCHEMA = """
 -- Таблица пользователей
 CREATE TABLE users (
     tg_id INTEGER PRIMARY KEY,
@@ -119,14 +120,64 @@ BEGIN
         )
     );
 END;
-    """
+"""
 
-    # Подключение и выполнение скрипта
-    async with aiosqlite.connect("data.db") as db:
-        await db.executescript(schema)
-        await db.commit()
-        print("База данных успешно создана!")
+async def migrate_data():
+    try:
+        # Подключаемся к старой базе
+        async with aiosqlite.connect('database/data.db.backup') as old_db:
+            old_db.row_factory = aiosqlite.Row
+            
+            # Получаем данные пользователей
+            async with old_db.execute("SELECT * FROM users") as cursor:
+                users = await cursor.fetchall()
+            
+            # Получаем транзакции
+            async with old_db.execute("SELECT * FROM transactions") as cursor:
+                transactions = await cursor.fetchall()
+            
+            # Получаем лимиты
+            async with old_db.execute("SELECT * FROM limits") as cursor:
+                limits = await cursor.fetchall()
+        
+        # Подключаемся к новой базе
+        async with aiosqlite.connect('database/data.db') as new_db:
+            # Создаем таблицы
+            await new_db.executescript(SCHEMA)
+            
+            # Мигрируем пользователей
+            for user in users:
+                await new_db.execute(
+                    "INSERT INTO users (tg_id, categories, tg_username, name, total_sum) VALUES (?, ?, ?, ?, ?)",
+                    (user['tg_id'], user['categories'], user['tg_username'], user['name'], user['total_sum'])
+                )
+            
+            # Мигрируем транзакции
+            for trans in transactions:
+                await new_db.execute(
+                    """INSERT INTO transactions 
+                    (transaction_id, tg_id, date_time, type, description, category, sum) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (trans['transaction_id'], trans['tg_id'], trans['date_time'], 
+                     trans['type'], trans['description'], trans['category'], trans['sum'])
+                )
+            
+            # Мигрируем лимиты
+            for limit in limits:
+                await new_db.execute(
+                    """INSERT INTO limits 
+                    (limit_id, tg_id, start_date, end_date, category, limit_sum) 
+                    VALUES (?, ?, ?, ?, ?, ?)""",
+                    (limit['limit_id'], limit['tg_id'], limit['start_date'], 
+                     limit['end_date'], limit['category'], limit['limit_sum'])
+                )
+            
+            await new_db.commit()
+            print("Миграция данных успешно завершена!")
+            
+    except Exception as e:
+        print(f"Ошибка при миграции данных: {e}")
+        raise
 
-# Запуск создания базы
 if __name__ == "__main__":
-    asyncio.run(create_database())
+    asyncio.run(migrate_data()) 
